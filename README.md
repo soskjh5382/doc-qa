@@ -1,32 +1,125 @@
-# React + TypeScript + Vite
+# 📄 문서 Q&A (RAG)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+> 문서(텍스트/PDF)를 넣으면 그 내용만 근거로 답하는 웹앱.
+> 문서에 없는 것은 지어내지 않고 "없다"고 답합니다. 대화도 이어집니다.
 
-Currently, two official plugins are available:
+**🔗 라이브 데모:** https://doc-qa-k3hn.onrender.com
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+> ⚠️ 무료 호스팅이라 첫 접속 시 서버를 깨우느라 30초~1분 걸릴 수 있습니다.
+> 문서 저장 시 AI 전처리가 실행되어 큰 문서는 시간이 조금 걸립니다.
 
-## React Compiler
+<!-- 여기에 스크린샷을 넣으면 좋습니다 -->
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the Oxlint configuration
+## 무엇을 하나
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+일반 AI에게 "우리 회사 연차 규정이 뭐야?"라고 물으면 일반론을 답합니다.
+이 앱은 **내가 넣은 문서**를 근거로 답하므로, 회사마다 다른 규정도 정확히 답합니다.
+그리고 문서에 답이 없으면 억지로 지어내지 않고 "찾을 수 없다"고 말합니다.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+---
+
+## RAG란 — 이 프로젝트의 핵심
+
+AI는 학습한 것만 알 뿐, 내 문서는 모릅니다.
+RAG(Retrieval-Augmented Generation)는 질문과 관련된 문서 조각을 **검색**해서
+AI에게 함께 주고, 그것을 근거로 **답변을 생성**하게 하는 방식입니다.
+
+```
+[준비] 문서 → AI로 정리 → 조각으로 분할 → 임베딩(숫자화) → 저장
+[질문] 질문 → 임베딩 → 가장 가까운 조각 검색 → 조각+질문을 AI에 → 답변
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+### 핵심 개념
+
+- **임베딩**: 글을 "의미 좌표(숫자 배열)"로 변환. 뜻이 비슷하면 숫자도 가깝다.
+  덕분에 "쉬는 날"로 물어도 "연차" 조각을 찾아낸다. (단순 키워드 검색과 다른 점)
+- **벡터 검색**: 질문과 각 조각의 임베딩을 코사인 유사도로 비교해 가장 가까운 조각을 찾음.
+- **근거 기반 생성**: 검색된 조각만 근거로 답하도록 프롬프트로 통제. 없으면 "없다"고 답함.
+
+---
+
+## 기술 스택
+
+**프론트엔드**
+- React + TypeScript + Vite
+- 채팅형 UI (질문/답변 누적, 출처 표시)
+
+**백엔드**
+- Node.js + Express + TypeScript
+- Gemini API (답변 생성 + 임베딩, 무료 등급)
+    - 답변: gemini-3.6-flash
+    - 임베딩: gemini-embedding-001 (3072차원)
+
+**문서 처리**
+- multer (파일 업로드) + pdf-parse (PDF 텍스트 추출)
+
+**배포**
+- Render (GitHub 연동 자동 배포)
+
+---
+
+## 구현한 기능
+
+- **텍스트 / PDF 입력** — 붙여넣기 또는 PDF 파일 업로드 모두 지원
+- **AI 전처리** — 저장 전에 AI가 문서를 검색하기 좋게 정리.
+  표처럼 구조가 지저분한 문서도 항목별로 재구성해 검색 정확도를 높임.
+  (특정 문서 양식을 가정하지 않는 범용 방식)
+- **의미 기반 검색** — 단어가 달라도 뜻이 통하면 찾아냄
+- **출처 표시** — 답변마다 "참고한 문서 구절"을 함께 제공해 신뢰성 확보
+- **대화 기억** — 이전 대화를 함께 전달해 맥락 유지
+- **환각 방지** — 문서에 없으면 "찾을 수 없다"고 답하도록 통제
+
+---
+
+## 구조
+
+```
+doc-qa/
+├── src/
+│   └── App.tsx              화면 (문서 입력 + 채팅 + 출처)
+├── server/
+│   ├── index.ts            서버 (/api/upload, /api/upload-pdf, /api/ask)
+│   ├── embedding.ts        글을 임베딩(숫자)으로 변환
+│   ├── preprocess.ts       저장 전 AI 문서 정리 (검색 품질 향상)
+│   ├── store.ts            조각 분할 + 메모리 저장 + 벡터 검색
+│   └── answer.ts           검색된 조각 근거로 답변 생성
+├── .env                    GEMINI_API_KEY (git 미포함)
+├── vite.config.ts          /api 프록시 (개발 모드)
+└── package.json
+```
+
+---
+
+## 설계에서 신경 쓴 점
+
+**1. 검색 품질이 답변 품질을 결정한다**
+아무리 좋은 모델도 관련 없는 조각을 받으면 제대로 답하지 못한다.
+그래서 조각 분할(청킹)과 저장 전 AI 정리에 공을 들였다.
+
+**2. 지저분한 입력을 다루는 범용 전처리**
+사용자가 어떤 형식(표/줄글/PDF)을 넣을지 알 수 없으므로,
+"이런 문서일 것"이라 가정하지 않고 "무엇이든 검색하기 좋게 정리하라"는
+범용 지시로 AI가 스스로 판단하게 했다.
+
+**3. 신뢰할 수 있는 답변**
+출처를 함께 보여주고, 문서에 없는 내용은 지어내지 않게 하여
+"이 답이 실제 문서에 근거하는가"를 사용자가 확인할 수 있게 했다.
+
+---
+
+## 로컬 실행
+
+```bash
+npm install
+
+# .env 생성
+# GEMINI_API_KEY=your_gemini_key
+
+# 개발 모드 (터미널 2개)
+npm run server   # 백엔드 localhost:3001
+npm run dev      # 프론트 localhost:5173
+```
+
+Gemini API 키는 https://aistudio.google.com/apikey 에서 무료로 발급.
