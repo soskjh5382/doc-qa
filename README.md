@@ -49,8 +49,8 @@ AI에게 함께 주고, 그것을 근거로 **답변을 생성**하게 하는 �
 **백엔드**
 - Node.js + Express + TypeScript
 - Gemini API (답변 생성 + 임베딩, 무료 등급)
-    - 답변: gemini-3.6-flash
-    - 임베딩: gemini-embedding-001 (3072차원)
+  - 답변: gemini-3.6-flash
+  - 임베딩: gemini-embedding-001 (3072차원)
 
 **문서 처리**
 - multer (파일 업로드) + pdf-parse (PDF 텍스트 추출)
