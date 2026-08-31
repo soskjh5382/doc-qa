@@ -18,10 +18,21 @@ const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 // ------------------------------------------------------------
 // 질문을 받아서, 문서 기반 답변 + 참고한 조각(출처)을 돌려준다.
 // ------------------------------------------------------------
+// 대화 한 턴의 형태 (질문 또는 답변)
+type Turn = {
+    role: "user" | "assistant"; // user=질문, assistant=답변
+    text: string;
+};
+
+// ------------------------------------------------------------
+// 질문 + 이전 대화 기록을 받아서, 문서 기반 답변 + 출처를 돌려준다.
+//   history: 지금까지의 대화 (없으면 빈 배열)
+// ------------------------------------------------------------
 export async function answerQuestion(
-    question: string
+    question: string,
+    history: Turn[] = []
 ): Promise<{ answer: string; sources: string[] }> {
-    // 1. 관련 조각 검색
+    // 1. 관련 조각 검색 (현재 질문 기준)
     const chunks = await search(question, 3);
 
     if (chunks.length === 0) {
@@ -33,25 +44,37 @@ export async function answerQuestion(
         .map((c, i) => `[자료 ${i + 1}]\n${c}`)
         .join("\n\n");
 
-    // 3. 프롬프트 조립
+    // 3. 이전 대화를 텍스트로 정리 (맥락 제공용)
+    //    "그럼 점심은?" 같은 후속 질문을 이해하게 해준다.
+    const historyText =
+        history.length > 0
+            ? "지금까지의 대화:\n" +
+            history
+                .map((t) => `${t.role === "user" ? "질문" : "답변"}: ${t.text}`)
+                .join("\n") +
+            "\n\n"
+            : "";
+
+    // 4. 프롬프트 조립 — 대화 맥락 + 참고 자료 + 현재 질문
     const prompt = `아래 참고 자료를 근거로 질문에 답하세요.
 
 규칙:
 - 참고 자료에 있는 내용만으로 답합니다.
 - 자료에 답이 없으면 "제공된 문서에서 답을 찾을 수 없습니다."라고 답합니다.
 - 추측하거나 자료 밖의 지식을 덧붙이지 마세요.
+- 이전 대화가 있으면 맥락을 참고해 후속 질문을 이해하세요.
+  (예: "그럼 점심은?"은 앞서 언급된 날짜의 점심을 뜻함)
 - 한국어로 간결하게 답합니다.
 
-참고 자료:
+${historyText}참고 자료:
 ${context}
 
-질문: ${question}`;
+현재 질문: ${question}`;
 
     const result = await model.generateContent(prompt);
 
-    // 답변 + 참고한 조각들(출처)을 함께 반환
     return {
         answer: result.response.text(),
-        sources: chunks, // 화면에 보여줄 출처
+        sources: chunks,
     };
 }

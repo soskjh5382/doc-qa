@@ -9,6 +9,7 @@
 // ============================================================
 
 import { embed } from "./embedding.js";
+import { preprocess } from "./preprocess.js";
 
 // ------------------------------------------------------------
 // 저장되는 조각 하나의 형태.
@@ -84,7 +85,10 @@ function splitIntoChunks(text: string): string[] {
 export async function addDocument(text: string): Promise<number> {
     store = []; // 새 문서를 넣을 때 기존 저장소를 비운다 (단순하게)
 
-    const chunks = splitIntoChunks(text);
+    // ★ 저장 전에 AI로 문서를 정리 (검색하기 좋게)
+    const cleaned = await preprocess(text);
+
+    const chunks = splitIntoChunks(cleaned);
 
     // 각 조각을 임베딩해서 저장
     for (const chunk of chunks) {

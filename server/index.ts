@@ -84,14 +84,14 @@ app.post("/api/upload-pdf", upload.single("file"), async (req, res) => {
 // ------------------------------------------------------------
 app.post("/api/ask", async (req, res) => {
     try {
-        const { question } = req.body;
+        // history도 함께 받음 (프론트가 지금까지의 대화를 보냄)
+        const { question, history } = req.body;
         if (!question || !question.trim()) {
             return res.status(400).json({ error: "질문이 필요합니다." });
         }
 
-        // RAG 전체 실행 (검색 + 답변 생성)
-        // answerQuestion이 이제 { answer, sources } 객체를 반환
-        const result = await answerQuestion(question);
+        // 질문 + 대화 기록을 넘김 (history 없으면 빈 배열)
+        const result = await answerQuestion(question, history || []);
         console.log(`질문 처리 완료`);
         res.json(result); // { answer, sources }를 그대로 전달
 
