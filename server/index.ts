@@ -13,7 +13,7 @@ import "dotenv/config";
 import path from "path";
 import { fileURLToPath } from "url";
 import { addDocument } from "./store.js";        // 문서 저장 함수
-import { answerQuestion } from "./answer.js";    // 답변 생성 함수
+import { answerQuestion, answerQuestionStream } from "./answer.js";    // 답변 생성 함수
 import multer from "multer";           // 파일 업로드 받기
 import { PDFParse } from "pdf-parse";   // PDF에서 글자 추출 (클래스 방식)
 
@@ -98,6 +98,43 @@ app.post("/api/ask", async (req, res) => {
     } catch (err) {
         console.error("질문 처리 실패:", err);
         res.status(500).json({ error: "답변 생성 중 문제가 발생했습니다." });
+    }
+});
+
+// ------------------------------------------------------------
+// POST /api/ask-stream — 스트리밍 답변 (SSE)
+//   답이 만들어지는 대로 조각을 흘려보낸다.
+// ------------------------------------------------------------
+app.post("/api/ask-stream", async (req, res) => {
+    try {
+        const { question, history } = req.body;
+        if (!question || !question.trim()) {
+            return res.status(400).json({ error: "질문이 필요합니다." });
+        }
+
+        // SSE 헤더 설정 (연결을 열어두고 조각을 계속 보냄)
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no"); // ★ 추가: 프록시(nginx 등)가 버퍼링해서 스트리밍 끊는 것 방지
+
+        // 스트리밍 실행: 조각이 올 때마다 프론트로 전송
+        const { sources } = await answerQuestionStream(
+            question,
+            history || [],
+            (chunk) => {
+                // 각 조각을 SSE 형식으로 전송 (data: ...\n\n)
+                res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+            }
+        );
+
+        // 답변이 끝나면 출처를 마지막으로 전송하고 종료 신호
+        res.write(`data: ${JSON.stringify({ sources, done: true })}\n\n`);
+        res.end();
+    } catch (err) {
+        console.error("스트리밍 실패:", err);
+        res.write(`data: ${JSON.stringify({ error: "답변 생성 중 문제가 발생했습니다." })}\n\n`);
+        res.end();
     }
 });
 

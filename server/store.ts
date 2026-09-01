@@ -25,6 +25,16 @@ type Chunk = {
 let store: Chunk[] = [];
 
 // ------------------------------------------------------------
+// 잠깐 쉬는 함수. ms(밀리초)만큼 기다린다.
+//   임베딩을 한꺼번에 몰아치면 무료 등급 분당 한도(30K 토큰/분)를
+//   순식간에 넘겨서 429가 난다. 그래서 조각 하나 처리할 때마다
+//   조금씩 쉬면서 "천천히" 보낸다.
+// ------------------------------------------------------------
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ------------------------------------------------------------
 // 두 벡터가 얼마나 비슷한지 (코사인 유사도). 1에 가까울수록 비슷.
 // test-embed.ts에서 썼던 것과 같은 함수.
 // ------------------------------------------------------------
@@ -90,11 +100,31 @@ export async function addDocument(text: string): Promise<number> {
 
     const chunks = splitIntoChunks(cleaned);
 
+    // 조각 사이에 쉬는 시간(밀리초).
+    //   무료 등급 임베딩 한도가 낮아서, 한꺼번에 보내면 429가 난다.
+    //   그래서 조각 하나 임베딩할 때마다 이만큼 쉬어준다.
+    //   너무 느리면 줄이고, 그래도 429가 나면 늘려라. (300~500 권장)
+    const DELAY_MS = 300;
+
+    console.log(`📄 조각 ${chunks.length}개 임베딩 시작…`);
+
     // 각 조각을 임베딩해서 저장
-    for (const chunk of chunks) {
-        const vector = await embed(chunk);   // 조각을 숫자로
+    for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const vector = await embed(chunk);   // 조각을 숫자로 (429 나면 embed 안에서 자동 재시도)
         store.push({ text: chunk, vector }); // 조각 + 숫자를 저장
+
+        // 진행 상황을 터미널에 표시 (몇 개 중 몇 개째인지)
+        console.log(`  ✅ ${i + 1}/${chunks.length} 조각 임베딩 완료`);
+
+        // 마지막 조각이 아니면 잠깐 쉰다.
+        //   (마지막엔 쉴 필요 없으니 조건으로 걸러 시간 절약)
+        if (i < chunks.length - 1) {
+            await sleep(DELAY_MS);
+        }
     }
+
+    console.log(`🎉 총 ${store.length}개 조각 저장 완료`);
 
     return store.length; // 저장된 조각 개수를 돌려줌
 }

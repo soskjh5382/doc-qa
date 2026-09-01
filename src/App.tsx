@@ -1,29 +1,32 @@
 // ============================================================
-// App.tsx — 문서 Q&A (RAG) + 대화 기억
-// 문서(텍스트/PDF)를 넣어 저장 → 그 내용으로 이어지는 대화.
+// App.tsx — 문서 Q&A (RAG) · 민트 톤 (포트폴리오와 통일)
+// 대화 기억 + 스트리밍 + PDF + 출처 표시
 // ============================================================
 
 import { useState } from "react";
 
+// 포트폴리오와 같은 팔레트 (민트 액센트 + 잉크 배경)
 const C = {
-    bg: "#0d0f14",
-    card: "#151922",
-    cardBorder: "#232936",
-    text: "#e8eaed",
-    dim: "#8b93a3",
-    faint: "#5a6272",
-    accent: "#e0a458",
-    accentDim: "#3a2f1f",
-    ok: "#5fb87a",
-    err: "#e07a7a",
+    bg: "#0b0d12",
+    card: "#141821",
+    cardHover: "#181d28",
+    line: "#232936",
+    text: "#eef1f6",
+    dim: "#98a1b2",
+    faint: "#5a6474",
+    accent: "#6ee7c7",     // 민트 (시그니처)
+    accentInk: "#0a1512",  // 민트 위 글자색
     field: "#0f1218",
+    err: "#e07a7a",
 };
 
-// 대화 메시지 하나의 형태
+const SANS = "'Inter', system-ui, sans-serif";
+const MONO = "'JetBrains Mono', ui-monospace, monospace";
+
 type Message = {
-    role: "user" | "assistant";  // user=내 질문, assistant=AI 답변
+    role: "user" | "assistant";
     text: string;
-    sources?: string[];          // 답변일 때만: 참고한 문서 구절
+    sources?: string[];
 };
 
 export default function App() {
@@ -31,13 +34,12 @@ export default function App() {
     const [uploaded, setUploaded] = useState(false);
     const [savedInfo, setSavedInfo] = useState("");
     const [question, setQuestion] = useState("");
-    // 대화 기록 (질문/답변이 순서대로 쌓임)
     const [messages, setMessages] = useState<Message[]>([]);
     const [uploading, setUploading] = useState(false);
     const [asking, setAsking] = useState(false);
     const [error, setError] = useState("");
+    const [inputFocus, setInputFocus] = useState(false); // 입력창 포커스 효과
 
-    // 텍스트 저장
     async function uploadDoc() {
         if (!docText.trim()) {
             setError("문서를 입력하세요.");
@@ -46,7 +48,7 @@ export default function App() {
         setError("");
         setUploading(true);
         setUploaded(false);
-        setMessages([]); // 새 문서 넣으면 이전 대화 초기화
+        setMessages([]);
         try {
             const res = await fetch("/api/upload", {
                 method: "POST",
@@ -66,12 +68,11 @@ export default function App() {
         }
     }
 
-    // PDF 저장
     async function uploadPdf(file: File) {
         setError("");
         setUploading(true);
         setUploaded(false);
-        setMessages([]); // 새 문서 넣으면 이전 대화 초기화
+        setMessages([]);
         try {
             const formData = new FormData();
             formData.append("file", file);
@@ -90,7 +91,7 @@ export default function App() {
         }
     }
 
-    // 질문 (이전 대화 기록을 함께 보냄)
+    // 스트리밍 질문
     async function ask() {
         if (!question.trim()) {
             setError("질문을 입력하세요.");
@@ -98,31 +99,50 @@ export default function App() {
         }
         setError("");
         setAsking(true);
-
         const currentQuestion = question;
         setQuestion("");
-
-        // 내 질문을 화면에 먼저 추가
-        setMessages((prev) => [...prev, { role: "user", text: currentQuestion }]);
-
+        const history = messages.map((m) => ({ role: m.role, text: m.text }));
+        setMessages((prev) => [
+            ...prev,
+            { role: "user", text: currentQuestion },
+            { role: "assistant", text: "", sources: [] },
+        ]);
         try {
-            // 이전 대화(history)를 함께 전송
-            const history = messages.map((m) => ({ role: m.role, text: m.text }));
-
-            const res = await fetch("/api/ask", {
+            const res = await fetch("/api/ask-stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ question: currentQuestion, history }),
             });
-            const data = await res.json();
-
-            if (data.error) {
-                setError(data.error);
-            } else {
-                setMessages((prev) => [
-                    ...prev,
-                    { role: "assistant", text: data.answer, sources: data.sources || [] },
-                ]);
+            const reader = res.body!.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split("\n\n");
+                buffer = parts.pop() || "";
+                for (const part of parts) {
+                    if (!part.startsWith("data: ")) continue;
+                    const data = JSON.parse(part.slice(6));
+                    if (data.chunk) {
+                        setMessages((prev) => {
+                            const copy = [...prev];
+                            const last = copy[copy.length - 1];
+                            copy[copy.length - 1] = { ...last, text: last.text + data.chunk };
+                            return copy;
+                        });
+                    }
+                    if (data.sources) {
+                        setMessages((prev) => {
+                            const copy = [...prev];
+                            const last = copy[copy.length - 1];
+                            copy[copy.length - 1] = { ...last, sources: data.sources };
+                            return copy;
+                        });
+                    }
+                    if (data.error) setError(data.error);
+                }
             }
         } catch {
             setError("서버에 연결할 수 없습니다.");
@@ -131,52 +151,40 @@ export default function App() {
         }
     }
 
-    // 대화 초기화 (문서는 유지)
     function resetChat() {
         setMessages([]);
         setError("");
     }
 
     return (
-        <div
-            style={{
-                minHeight: "100vh",
-                background: C.bg,
-                color: C.text,
-                fontFamily: "'Inter', system-ui, sans-serif",
-                padding: "56px 20px 80px",
-                boxSizing: "border-box",
-            }}
-        >
-            <div style={{ maxWidth: 680, margin: "0 auto" }}>
+        <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: SANS }}>
+            <div style={{ maxWidth: 680, margin: "0 auto", padding: "72px 24px 100px" }}>
                 {/* 헤더 */}
-                <header style={{ marginBottom: 40 }}>
+                <header style={{ marginBottom: 48 }}>
                     <div
                         style={{
                             display: "inline-block",
-                            fontSize: 11,
-                            letterSpacing: "0.15em",
-                            textTransform: "uppercase",
+                            fontFamily: MONO,
+                            fontSize: 12,
+                            letterSpacing: "0.12em",
                             color: C.accent,
-                            borderBottom: `1px solid ${C.accentDim}`,
+                            borderBottom: `1px solid ${C.accent}33`,
                             paddingBottom: 6,
-                            marginBottom: 16,
+                            marginBottom: 20,
                         }}
                     >
-                        Document Q&A
+                        document q&a
                     </div>
-                    <h1 style={{ fontSize: 32, fontWeight: 600, margin: 0, lineHeight: 1.2, letterSpacing: "-0.02em" }}>
+                    <h1 style={{ fontSize: "clamp(30px, 6vw, 40px)", fontWeight: 700, margin: 0, lineHeight: 1.1, letterSpacing: "-0.03em" }}>
                         문서에게 직접 물어보세요
                     </h1>
-                    <p style={{ color: C.dim, fontSize: 15, marginTop: 12, lineHeight: 1.6 }}>
-                        문서를 넣으면 그 내용만 근거로 답합니다.
-                        <br />
-                        이어지는 질문도 맥락을 기억해 답합니다.
+                    <p style={{ color: C.dim, fontSize: 15.5, marginTop: 16, lineHeight: 1.7, maxWidth: 480 }}>
+                        문서를 넣으면 그 내용만 근거로 답합니다. 없는 것은 지어내지 않고, 이어지는 질문도 맥락을 기억합니다.
                     </p>
                 </header>
 
                 {/* 1단계: 문서 넣기 */}
-                <section style={cardStyle()}>
+                <section style={card()}>
                     <StepLabel n="1" title="문서 넣기" done={uploaded} />
                     <textarea
                         value={docText}
@@ -189,22 +197,22 @@ export default function App() {
                         spellCheck={false}
                         style={{
                             width: "100%",
-                            minHeight: 150,
+                            minHeight: 148,
                             background: C.field,
                             color: C.text,
-                            border: `1px solid ${C.cardBorder}`,
-                            borderRadius: 10,
+                            border: `1px solid ${C.line}`,
+                            borderRadius: 12,
                             padding: 16,
                             fontSize: 14,
-                            lineHeight: 1.6,
+                            lineHeight: 1.65,
                             fontFamily: "inherit",
                             resize: "vertical",
                             outline: "none",
                             boxSizing: "border-box",
-                            marginTop: 16,
+                            marginTop: 18,
                         }}
                     />
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16 }}>
                         <button onClick={uploadDoc} disabled={uploading} style={primaryBtn(uploading)}>
                             {uploading ? "정리하는 중…" : "텍스트 저장"}
                         </button>
@@ -227,11 +235,12 @@ export default function App() {
                             style={{
                                 marginTop: 16,
                                 padding: "10px 14px",
-                                background: C.accentDim,
+                                background: `${C.accent}12`,
                                 border: `1px solid ${C.accent}33`,
-                                borderRadius: 8,
+                                borderRadius: 10,
                                 fontSize: 13,
                                 color: C.accent,
+                                fontFamily: MONO,
                             }}
                         >
                             ✓ 저장 완료 · {savedInfo}
@@ -242,11 +251,11 @@ export default function App() {
                 {/* 2단계: 대화 */}
                 <section
                     style={{
-                        ...cardStyle(),
+                        ...card(),
                         marginTop: 20,
-                        opacity: uploaded ? 1 : 0.45,
+                        opacity: uploaded ? 1 : 0.4,
                         pointerEvents: uploaded ? "auto" : "none",
-                        transition: "opacity 0.25s",
+                        transition: "opacity 0.3s",
                     }}
                 >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -256,44 +265,43 @@ export default function App() {
                                 onClick={resetChat}
                                 style={{
                                     background: "none",
-                                    border: `1px solid ${C.cardBorder}`,
+                                    border: `1px solid ${C.line}`,
                                     borderRadius: 8,
                                     color: C.dim,
                                     padding: "6px 12px",
                                     fontSize: 12,
-                                    fontFamily: "inherit",
+                                    fontFamily: MONO,
                                     cursor: "pointer",
                                 }}
                             >
-                                대화 초기화
+                                초기화
                             </button>
                         )}
                     </div>
 
-                    {/* 대화 내역 */}
                     {messages.length > 0 && (
-                        <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 14 }}>
+                        <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 12 }}>
                             {messages.map((m, i) => (
                                 <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
                                     <div
                                         style={{
-                                            maxWidth: "85%",
+                                            maxWidth: "86%",
                                             background: m.role === "user" ? C.accent : C.field,
-                                            color: m.role === "user" ? "#1a1206" : C.text,
-                                            border: m.role === "user" ? "none" : `1px solid ${C.cardBorder}`,
-                                            borderLeft: m.role === "assistant" ? `3px solid ${C.accent}` : undefined,
-                                            borderRadius: 10,
+                                            color: m.role === "user" ? C.accentInk : C.text,
+                                            border: m.role === "user" ? "none" : `1px solid ${C.line}`,
+                                            borderRadius: m.role === "user" ? "14px 14px 4px 14px" : "14px 14px 14px 4px",
                                             padding: "12px 15px",
                                             fontSize: 14,
-                                            lineHeight: 1.7,
+                                            lineHeight: 1.75,
                                             whiteSpace: "pre-wrap",
+                                            fontWeight: m.role === "user" ? 500 : 400,
                                         }}
                                     >
-                                        {m.text}
+                                        {m.text || (m.role === "assistant" ? <Dots /> : "")}
                                         {m.role === "assistant" && m.sources && m.sources.length > 0 && (
-                                            <details style={{ marginTop: 10 }}>
-                                                <summary style={{ fontSize: 11, color: C.faint, cursor: "pointer", userSelect: "none" }}>
-                                                    📎 참고 구절 {m.sources.length}개
+                                            <details style={{ marginTop: 12 }}>
+                                                <summary style={{ fontSize: 11, color: C.faint, cursor: "pointer", userSelect: "none", fontFamily: MONO }}>
+                                                    참고 구절 {m.sources.length}
                                                 </summary>
                                                 <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                                                     {m.sources.map((src, j) => (
@@ -301,8 +309,8 @@ export default function App() {
                                                             key={j}
                                                             style={{
                                                                 background: C.bg,
-                                                                border: `1px solid ${C.cardBorder}`,
-                                                                borderRadius: 6,
+                                                                border: `1px solid ${C.line}`,
+                                                                borderRadius: 8,
                                                                 padding: "8px 10px",
                                                                 fontSize: 12,
                                                                 lineHeight: 1.5,
@@ -318,14 +326,14 @@ export default function App() {
                                     </div>
                                 </div>
                             ))}
-                            {asking && <div style={{ color: C.faint, fontSize: 13 }}>답변 생각 중…</div>}
                         </div>
                     )}
 
-                    {/* 입력창 */}
-                    <div style={{ display: "flex", gap: 10, marginTop: messages.length > 0 ? 18 : 16 }}>
+                    <div style={{ display: "flex", gap: 10, marginTop: messages.length > 0 ? 20 : 18 }}>
                         <input
                             value={question}
+                            onFocus={() => setInputFocus(true)}
+                            onBlur={() => setInputFocus(false)}
                             onChange={(e) => setQuestion(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && uploaded && !asking && ask()}
                             placeholder={messages.length > 0 ? "이어서 질문하세요…" : "문서에 대해 물어보세요"}
@@ -334,12 +342,13 @@ export default function App() {
                                 flex: 1,
                                 background: C.field,
                                 color: C.text,
-                                border: `1px solid ${C.cardBorder}`,
-                                borderRadius: 10,
+                                border: `1px solid ${inputFocus ? C.accent + "88" : C.line}`,
+                                borderRadius: 12,
                                 padding: "13px 16px",
                                 fontSize: 15,
                                 fontFamily: "inherit",
                                 outline: "none",
+                                transition: "border-color 0.2s",
                             }}
                         />
                         <button onClick={ask} disabled={!uploaded || asking} style={primaryBtn(!uploaded || asking)}>
@@ -352,33 +361,37 @@ export default function App() {
                     <div style={{ color: C.err, fontSize: 13, marginTop: 16, textAlign: "center" }}>{error}</div>
                 )}
             </div>
+
+            <style>{`
+        @keyframes dot { 0%, 80%, 100% { opacity: 0.3 } 40% { opacity: 1 } }
+      `}</style>
         </div>
     );
 
-    function cardStyle(): React.CSSProperties {
-        return { background: C.card, border: `1px solid ${C.cardBorder}`, borderRadius: 16, padding: 24 };
+    function card(): React.CSSProperties {
+        return { background: C.card, border: `1px solid ${C.line}`, borderRadius: 18, padding: 26 };
     }
     function primaryBtn(disabled: boolean): React.CSSProperties {
         return {
-            background: disabled ? "#2a3040" : C.accent,
-            color: disabled ? C.faint : "#1a1206",
+            background: disabled ? "#242b38" : C.accent,
+            color: disabled ? C.faint : C.accentInk,
             border: "none",
-            borderRadius: 10,
+            borderRadius: 11,
             padding: "12px 22px",
             fontSize: 14,
             fontWeight: 600,
             fontFamily: "inherit",
             cursor: disabled ? "default" : "pointer",
             whiteSpace: "nowrap",
-            transition: "background 0.15s",
+            transition: "background 0.15s, opacity 0.15s",
         };
     }
     function ghostBtn(disabled: boolean): React.CSSProperties {
         return {
             background: "transparent",
             color: disabled ? C.faint : C.text,
-            border: `1px solid ${C.cardBorder}`,
-            borderRadius: 10,
+            border: `1px solid ${C.line}`,
+            borderRadius: 11,
             padding: "12px 20px",
             fontSize: 14,
             fontWeight: 500,
@@ -390,6 +403,26 @@ export default function App() {
     }
 }
 
+// 답변 대기 중 점 3개 애니메이션
+function Dots() {
+    return (
+        <span style={{ display: "inline-flex", gap: 4 }}>
+      {[0, 1, 2].map((i) => (
+          <span
+              key={i}
+              style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: "50%",
+                  background: "#6ee7c7",
+                  animation: `dot 1.2s ${i * 0.2}s infinite`,
+              }}
+          />
+      ))}
+    </span>
+    );
+}
+
 function StepLabel({ n, title, done }: { n: string; title: string; done?: boolean }) {
     return (
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -398,10 +431,12 @@ function StepLabel({ n, title, done }: { n: string; title: string; done?: boolea
               width: 26,
               height: 26,
               borderRadius: "50%",
-              background: done ? "#5fb87a" : "#e0a458",
-              color: "#1a1206",
-              fontSize: 13,
+              background: done ? "#6ee7c7" : "transparent",
+              border: done ? "none" : `1.5px solid #6ee7c7`,
+              color: done ? "#0a1512" : "#6ee7c7",
+              fontSize: 12,
               fontWeight: 700,
+              fontFamily: "'JetBrains Mono', monospace",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
