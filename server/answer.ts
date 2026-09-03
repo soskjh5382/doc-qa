@@ -13,13 +13,13 @@ import { search } from "./store.js";
 
 // Gemini 클라이언트 (답변 생성용)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
 // ------------------------------------------------------------
 // 질문을 받아서, 문서 기반 답변 + 참고한 조각(출처)을 돌려준다.
 // ------------------------------------------------------------
 // 대화 한 턴의 형태 (질문 또는 답변)
-type Turn = {
+type Turn = {g
     role: "user" | "assistant"; // user=질문, assistant=답변
     text: string;
 };

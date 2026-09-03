@@ -16,7 +16,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import "dotenv/config";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 
 // ------------------------------------------------------------
 // 지저분한 원본 텍스트를 받아, 검색하기 좋게 정리한 텍스트를 돌려준다.
