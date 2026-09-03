@@ -19,7 +19,7 @@ const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
 // 질문을 받아서, 문서 기반 답변 + 참고한 조각(출처)을 돌려준다.
 // ------------------------------------------------------------
 // 대화 한 턴의 형태 (질문 또는 답변)
-type Turn = {g
+type Turn = {
     role: "user" | "assistant"; // user=질문, assistant=답변
     text: string;
 };
